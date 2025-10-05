@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument('--l_secs', default=64, type=int, help='l_secs')
 
     #                   help='Path to dataset root directory')
-    parser.add_argument('--batch-size', type=int, default=2)
+    parser.add_argument('--batch-size', type=int, default=8)
     parser.add_argument('--epochs', type=int, default=70)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--weight-decay', type=float, default=0.01)
@@ -68,20 +68,22 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
         
         optimizer.zero_grad()
         
-        main_output = model(video_feat)
+        main_output, aux_output = model(video_feat)
+
+        aux_loss = criterion(aux_output, labels) if aux_output is not None else 0.0
         
         main_loss = criterion(main_output, labels)
         
-        total_epoch_loss = main_loss 
+        total_epoch_loss = main_loss + aux_loss
         # if iter%8 == 0:
-        #     total_epoch_loss.backward()
-        #     optimizer.step()
+        total_epoch_loss.backward()
+        optimizer.step()
         
         total_loss += total_epoch_loss.item()
         progress_bar.set_postfix({
             "Loss": f"{total_epoch_loss.item():.4f}",
             "Main": f"{main_loss.item():.4f}",
-            # "Aux": f"{aux_loss.item():.4f}"
+            "Aux": f"{aux_loss.item():.4f}"
         })
         
     avg_loss = total_loss / len(dataloader)

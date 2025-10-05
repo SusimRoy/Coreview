@@ -54,7 +54,7 @@ class MultiHeadAttention(nn.Module):
         # 4. Reshape and project output
         # (B, num_heads, N, head_dim) -> (B, N, num_heads, head_dim) -> (B, N, C)
         attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_length, self.dim)
-        output = self.out_proj(attn_output)
+        attn_output = self.out_proj(attn_output)
 
         # Return the final output and the original key vectors (before reshaping)
-        return output, k
+        return attn_output, k

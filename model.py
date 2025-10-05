@@ -9,26 +9,31 @@ from transformers import SwinModel, ViTModel
 class MLP(nn.Module):
     def __init__(self, in_features, hidden_features, out_features):
         super().__init__()
-        self.fc1 = nn.Linear(in_features, in_features)
+        self.fc1 = nn.Linear(in_features, out_features)
         self.act = nn.GELU()
+        # self.fc2 = nn.Linear(hidden_features, out_features)
 
     def forward(self, x):
-        return self.act(self.fc1(x))
+        x = self.fc1(x)
+        x = self.act(x)
+        # x = self.fc2(x)
+        return x
 
 class LearnableVTMBlock(nn.Module):
-    def __init__(self, dim: int, num_heads: int, partition_factor: int = 6, mlp_ratio: float = 4.0):
+    def __init__(self, dim: int, out_dim: int, num_heads: int, partition_factor: int = 6, mlp_ratio: float = 4.0):
         super().__init__()
         self.dim = dim
+        self.out_dim = out_dim
         self.num_heads = num_heads
         self.gamma = partition_factor
 
         self.norm1 = nn.LayerNorm(dim)
         self.attn1 = MultiHeadAttention(dim, num_heads=num_heads, batch_first=True)
-        self.saliency_head = nn.Linear(dim, 1)
-        self.qkv_proj = nn.Linear(dim, dim * 3)
+        self.saliency_head = nn.Linear(dim, 1, bias=False)
+        self.qkv_proj = nn.Linear(dim, dim * 3, bias=False)
         self.norm2 = nn.LayerNorm(dim)
-        self.mlp1 = MLP(in_features=dim, hidden_features=int(dim * mlp_ratio), out_features=dim)
-        self.mlp2 = MLP(in_features=dim, hidden_features=int(dim * mlp_ratio), out_features=dim)
+        self.mlp1 = MLP(in_features=dim, hidden_features=int(dim * mlp_ratio), out_features=out_dim)
+        self.mlp2 = MLP(in_features=dim, hidden_features=int(dim * mlp_ratio), out_features=out_dim)
         
     def forward(self, x: torch.Tensor, x_aux: torch.Tensor):
         # === Main Path ===
@@ -36,6 +41,7 @@ class LearnableVTMBlock(nn.Module):
         x_norm = self.norm1(x)
         # Attention and K matrix extraction
         x_prime, K_matrix = self.attn1(x_norm)
+        x_prime = nn.Dropout(0.1)(x_prime)
         x_res = x + x_prime
         saliency_scores = torch.tanh(self.saliency_head(K_matrix))  # (B, N, 1)
         B, N, C = x.shape
@@ -81,24 +87,18 @@ class LearnableVTMBlock(nn.Module):
 class VideoTokenMergingTransformer(nn.Module):
     def __init__(self, num_classes: int, num_tokens: int, patch_dim: int = 1024, num_vtm_blocks: int = 3, num_heads: int = 8):
         super().__init__()
-        # self.num_frames = num_frames
-        
-        # if dataset.upper() == 'LVU':
-        #     self.encoder = ViTModel.from_pretrained('google/vit-large-patch16-224-in21k')
-        #     encoder_dim = 1024
-        # else:
-        #     self.encoder = SwinModel.from_pretrained('microsoft/swin-base-patch4-window7-224-in22k')
-        #     encoder_dim = 1024
-            
-        # for param in self.encoder.parameters():
-        #     param.requires_grad = False
-                        
+
+        dims = [patch_dim // (2**i) for i in range(num_vtm_blocks + 1)]  # [1024, 512, 256, 128]
         self.vtm_blocks = nn.ModuleList([
-            LearnableVTMBlock(dim=patch_dim, num_heads=num_heads) for _ in range(num_vtm_blocks)
+            LearnableVTMBlock(dim=dims[i], out_dim=dims[i+1], num_heads=num_heads) for i in range(num_vtm_blocks)
         ])
         self.pos_embedding = nn.Parameter(torch.randn(1, num_tokens, patch_dim))
-        self.prediction_head = nn.Sequential(
-            nn.Linear(patch_dim, num_classes)
+        final_dim = dims[num_vtm_blocks]  # Final dimension after all VTM blocks
+        self.prediction_head1 = nn.Sequential(
+            nn.Linear(final_dim, num_classes)
+        )
+        self.prediction_head2 = nn.Sequential(
+            nn.Linear(final_dim, num_classes)
         )
 
     def forward(self, tokens: torch.Tensor):
@@ -107,6 +107,13 @@ class VideoTokenMergingTransformer(nn.Module):
         aux_tokens = tokens.clone()
         for block in self.vtm_blocks:
             tokens, aux_tokens = block(tokens, aux_tokens)
-        final_representation = tokens.mean(dim=1)
-        output = self.prediction_head(final_representation)
-        return output
+        if self.training:
+            final_representation1 = tokens.mean(dim=1)
+            output = self.prediction_head1(final_representation1)
+            final_representation2 = aux_tokens.mean(dim=1)
+            aux_output = self.prediction_head2(final_representation2)
+            return output, aux_output  
+        else:
+            final_representation = tokens.mean(dim=1)
+            output = self.prediction_head1(final_representation)
+            return output
