@@ -7,19 +7,20 @@ from moviepy.editor import *
 import cv2
 import numpy as np
 from mmaction.apis import init_recognizer, inference_recognizer
-from mmaction.models import build_model
+# from mmaction.models import build_model
 from einops import rearrange, reduce, repeat
+from tqdm import tqdm
 
-config_file = 'Video-Swin-Transformer/configs/recognition/swin/swin_base_patch244_window877_kinetics600_22k.py'
-# # download the checkpoint from model zoo and put it in `checkpoints/`
-checkpoint_file = 'Video-Swin-Transformer/checkpoints/swin_base_patch244_window877_kinetics600_22k.pth'
+
+config_file = '/home/csgrad/susimmuk/long-video/extract_features/mmaction2/configs/recognition/swin/swin-base-p244-w877_in1k-pre_8xb8-amp-32x2x1-30e_kinetics400-rgb.py'
+checkpoint_file = 'https://download.openmmlab.com/mmaction/v1.0/recognition/swin/swin-base-p244-w877_in1k-pre_8xb8-amp-32x2x1-30e_kinetics400-rgb/swin-base-p244-w877_in1k-pre_8xb8-amp-32x2x1-30e_kinetics400-rgb_20220930-182ec6cc.pth'
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 model = init_recognizer(config_file, checkpoint_file, device=device)
 
-DATA_ROOT = '/playpen-storage/mmiemon/lvu/data'
+DATA_ROOT = '/data_local3/susimmuk'
 
 all_ids = []
-csv_file = f'../data/Breakfast/breakfast/test.csv'
+csv_file = f'/home/csgrad/susimmuk/long-video/data/Breakfast/test.csv'
 with open(csv_file, 'r') as f:
     f.readline()
     for line in f:
@@ -29,12 +30,11 @@ with open(csv_file, 'r') as f:
 print('total files', len(set(all_ids)))
 random.shuffle(all_ids)
 
-for cnt, video_id in enumerate(all_ids):
-    dest_mean = f'{DATA_ROOT}/breakfast/video_swin_features/temporal_mean_pooling/{video_id}.npy'
-
-    if os.path.exists(dest_mean):
+for cnt, video_id in tqdm(enumerate(all_ids)):
+    dest_mean = f'{DATA_ROOT}/lvu/{video_id}.npy'
+    if not os.path.exists(dest_mean):
         file = video_id.split('.')[0].replace('-', '/')
-        file = f'{DATA_ROOT}/breakfast/BreakfastII_15fps_qvga_sync/{file}.avi'
+        file = f'{DATA_ROOT}/BreakfastII_15fps_qvga_sync/{file}.avi'
         clip = VideoFileClip(file)
         n_frames = int(clip.duration * clip.fps)
         n_segments = 64
@@ -47,7 +47,7 @@ for cnt, video_id in enumerate(all_ids):
         else:
             step = n_frames / float(n_segments)
             starts = np.arange(0, n_frames, step=step)
-        print(cnt, file, n_frames, len(starts))
+        # print(cnt, file, n_frames, len(starts))
 
         if n_frames < (n_segments+segment_length):
             starts = [i for i in range(n_frames-segment_length)]
@@ -58,7 +58,7 @@ for cnt, video_id in enumerate(all_ids):
         mean_features = []
         for start in starts:
             start = int(start)
-            print(cnt, file, start, '/', n_frames)
+            # print(cnt, file, start, '/', n_frames)
             frames = []
             for i in range(start, start + segment_length):
                 image = cv2.resize(clip.get_frame(i / clip.fps), (224, 224), interpolation=cv2.INTER_AREA)
@@ -66,7 +66,7 @@ for cnt, video_id in enumerate(all_ids):
             frames = np.asarray(frames) / 255.0
             frames = torch.from_numpy(frames.transpose([3, 0, 1, 2])).float()
             frames = torch.unsqueeze(frames, 0)
-            features = torch.squeeze(model.extract_feat(frames.to(device))).detach().cpu().numpy()
+            features = torch.squeeze(model.extract_feat(frames.to(device))[0]).detach().cpu().numpy()
 
             mean = reduce(features, 'c t h w -> c h w', 'mean')
             mean = rearrange(mean, 'c h w-> (h w) c')
@@ -74,7 +74,7 @@ for cnt, video_id in enumerate(all_ids):
 
         mean_features = np.asarray(mean_features)
 
-        print(cnt, file)
-        print(mean_features.shape)
+        # print(cnt, file)
+        # print(mean_features.shape)
 
         np.save(dest_mean, mean_features)

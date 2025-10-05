@@ -1,21 +1,25 @@
 import os
 import math
 import argparse
+from matplotlib.pylab import size
 import torch
 import torch.nn as nn
 from tqdm import tqdm
 from torch.utils.data import DataLoader
+from datasets.breakfast_dataset import CustomDataset
 from model import VideoTokenMergingTransformer
-from dataset import LVUDataset, BreakfastDataset, COINDataset
+# from dataset import LVUDataset, BreakfastDataset, COINDataset
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Video Token Merging Training')
     parser.add_argument('--dataset', type=str, default='LVU', choices=['LVU', 'Breakfast', 'COIN'],
                       help='Dataset to use for training')
-    parser.add_argument('--data-path', type=str, required=True,
-                      help='Path to dataset root directory')
-    parser.add_argument('--batch-size', type=int, default=16)
+    # parser.add_argument('--data-path', type=str, required=True,
+    parser.add_argument('--l_secs', default=64, type=int, help='l_secs')
+
+    #                   help='Path to dataset root directory')
+    parser.add_argument('--batch-size', type=int, default=2)
     parser.add_argument('--epochs', type=int, default=70)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--weight-decay', type=float, default=0.01)
@@ -57,27 +61,27 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
     total_loss = 0.0
     
     progress_bar = tqdm(dataloader, desc="Training", leave=False)
-    for videos, labels in progress_bar:
-        videos, labels = videos.to(device), labels.to(device)
+    for id, video_feat, labels in progress_bar:
+        video_feat, labels = video_feat.to(device), labels.to(device)
+        # print(video_feat.shape)
+        # print(labels.shape)
         
         optimizer.zero_grad()
         
-        main_output, aux_loss = model(videos)
+        main_output = model(video_feat)
         
         main_loss = criterion(main_output, labels)
         
-        # The final loss is the sum of the main task loss and the auxiliary loss
-        # This allows the gradient to flow back through the auxiliary path
-        total_epoch_loss = main_loss + aux_loss
-        
-        total_epoch_loss.backward()
-        optimizer.step()
+        total_epoch_loss = main_loss 
+        # if iter%8 == 0:
+        #     total_epoch_loss.backward()
+        #     optimizer.step()
         
         total_loss += total_epoch_loss.item()
         progress_bar.set_postfix({
             "Loss": f"{total_epoch_loss.item():.4f}",
             "Main": f"{main_loss.item():.4f}",
-            "Aux": f"{aux_loss.item():.4f}"
+            # "Aux": f"{aux_loss.item():.4f}"
         })
         
     avg_loss = total_loss / len(dataloader)
@@ -93,11 +97,11 @@ def evaluate(model, dataloader, criterion, device):
     total_samples = 0
     
     with torch.no_grad():
-        for videos, labels in tqdm(dataloader, desc="Evaluating", leave=False):
+        for id, videos, labels in tqdm(dataloader, desc="Evaluating", leave=False):
             videos, labels = videos.to(device), labels.to(device)
             
             # In eval mode, aux_loss is 0 and the auxiliary path is skipped
-            main_output, _ = model(videos)
+            main_output = model(videos)
             
             loss = criterion(main_output, labels)
             total_loss += loss.item()
@@ -109,34 +113,37 @@ def evaluate(model, dataloader, criterion, device):
     avg_loss = total_loss / len(dataloader)
     accuracy = (correct_predictions / total_samples) * 100
     print(f"Evaluation Finished. Average Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%")
+    return avg_loss, accuracy
 
 def main():
     args = parse_args()
     print(f"Using device: {args.device}")
     
-    # Create datasets and dataloaders
-    train_dataset = get_dataset(args.dataset, args.data_path, split='train')
-    val_dataset = get_dataset(args.dataset, args.data_path, split='val')
+    trainset = CustomDataset(args=args, split='train')
+    valset = CustomDataset(args=args, split='test')
+
+    trainloader = torch.utils.data.DataLoader(
+            trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    valloader = torch.utils.data.DataLoader(
+            valset, batch_size=1, shuffle=False, num_workers=args.num_workers)
     
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, 
-                            shuffle=True, num_workers=args.num_workers)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
-                          shuffle=False, num_workers=args.num_workers)
-    
-    num_classes = {'LVU': 9, 'Breakfast': 10, 'COIN': 180}[args.dataset.upper()]
-    num_frames = 60 if args.dataset.upper() == 'LVU' else 64
-    patch_dim = 1024  
-    
+    num_classes = {'LVU': 9, 'Breakfast': 10, 'COIN': 180}[args.dataset]
+    patch_dim = 1024
+    if args.dataset.upper() == 'LVU':
+        num_frames = 60
+        num_tokens = 16 * 16 * num_frames  # ViT-L: 16x16 patches
+    else:
+        num_frames = 64
+        num_tokens = 7 * 7 * num_frames    # Swin-B: 7x7 patches
+
     model = VideoTokenMergingTransformer(
         num_classes=num_classes,
-        num_frames=num_frames,
+        num_tokens=num_tokens,
         patch_dim=patch_dim,
         num_vtm_blocks=3,
-        num_heads=8,
-        dataset=args.dataset
+        num_heads=8
     ).to(args.device)
     
-    # Setup training
     criterion = nn.CrossEntropyLoss()
     optimizer, scheduler = configure_optimizer(
         model, 
@@ -145,21 +152,16 @@ def main():
         num_epochs=args.epochs
     )
     
-    # Training loop
     best_acc = 0
     for epoch in range(args.epochs):
         print(f"\n--- Epoch {epoch + 1}/{args.epochs} ---")
         
-        # Train
-        train_one_epoch(model, train_loader, optimizer, criterion, args.device)
+        train_one_epoch(model, trainloader, optimizer, criterion, args.device)
         
-        # Validate
-        val_loss, val_acc = evaluate(model, val_loader, criterion, args.device)
+        val_loss, val_acc = evaluate(model, valloader, criterion, args.device)
         
-        # Update learning rate
         scheduler.step()
         
-        # Save best model
         if val_acc > best_acc:
             best_acc = val_acc
             torch.save(model.state_dict(), f'best_model_{args.dataset.lower()}.pth')

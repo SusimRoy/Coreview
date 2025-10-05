@@ -1,5 +1,6 @@
 import torch
 from model import VideoTokenMergingTransformer
+import numpy as np
 
 def test_forward():
     # Model parameters
@@ -41,4 +42,6 @@ def test_forward():
     print("\nForward pass successful! ✅")
 
 if __name__ == "__main__":
-    test_forward()
+    video_features = np.load('/data_local3/susimmuk/lvu/P17-stereo-P17_milk_ch0.npy')
+    print(video_features.shape)
+    # test_forward()
