@@ -24,3 +24,5 @@ Thumbs.db
 # Large data files
 *.npy
 *.npz
+
+.training_plots/

@@ -20,12 +20,14 @@ class MLP(nn.Module):
         return x
 
 class LearnableVTMBlock(nn.Module):
-    def __init__(self, dim: int, out_dim: int, num_heads: int, partition_factor: int = 6, mlp_ratio: float = 4.0):
+    def __init__(self, dim: int, out_dim: int, num_heads: int, partition_factor: int = 6, 
+                 mlp_ratio: float = 4.0, temperature: float = 1.0):
         super().__init__()
         self.dim = dim
         self.out_dim = out_dim
         self.num_heads = num_heads
         self.gamma = partition_factor
+        self.temperature = nn.Parameter(torch.tensor(temperature))  # Learnable temperature
 
         self.norm1 = nn.LayerNorm(dim)
         self.attn1 = MultiHeadAttention(dim, num_heads=num_heads, batch_first=True)
@@ -34,41 +36,69 @@ class LearnableVTMBlock(nn.Module):
         self.norm2 = nn.LayerNorm(dim)
         self.mlp1 = MLP(in_features=dim, hidden_features=int(dim * mlp_ratio), out_features=out_dim)
         self.mlp2 = MLP(in_features=dim, hidden_features=int(dim * mlp_ratio), out_features=out_dim)
+    
+    def gumbel_top_k_selection(self, saliency_logits, k):
+        """Gumbel-Softmax top-k selection"""
+        B, N = saliency_logits.shape
+        
+        # Add Gumbel noise
+        gumbel_noise = -torch.log(-torch.log(torch.rand_like(saliency_logits) + 1e-8) + 1e-8)
+        gumbel_logits = (saliency_logits + gumbel_noise) / self.temperature
+        
+        # Get top-k indices  
+        _, top_k_indices = torch.topk(gumbel_logits, k, dim=-1)
+        
+        # Create hard mask with straight-through gradients
+        hard_mask = torch.zeros_like(saliency_logits).scatter_(-1, top_k_indices, 1.0)
+        soft_weights = F.softmax(gumbel_logits, dim=-1)
+        
+        # Straight-through estimator
+        target_mask = hard_mask - soft_weights.detach() + soft_weights
+        
+        return target_mask.bool(), top_k_indices
         
     def forward(self, x: torch.Tensor, x_aux: torch.Tensor):
         # === Main Path ===
-        # Main Path Normalization
         x_norm = self.norm1(x)
-        # Attention and K matrix extraction
         x_prime, K_matrix = self.attn1(x_norm)
         x_prime = nn.Dropout(0.1)(x_prime)
         x_res = x + x_prime
-        saliency_scores = torch.tanh(self.saliency_head(K_matrix))  # (B, N, 1)
+        
+        # Use raw logits instead of tanh for Gumbel-Softmax
+        saliency_logits = self.saliency_head(K_matrix).squeeze(-1)  # (B, N)
+        
         B, N, C = x.shape
         num_targets = N // self.gamma
-        sampling_probs = F.softmax(saliency_scores.squeeze(-1), dim=1)  # (B, N)
-        target_indices = torch.multinomial(sampling_probs, num_samples=num_targets, replacement=False)
-        target_mask = torch.zeros_like(sampling_probs, dtype=torch.bool).scatter_(1, target_indices, True)
+        
+        # Gumbel-Softmax selection
+        target_mask, target_indices = self.gumbel_top_k_selection(saliency_logits, num_targets)
         source_mask = ~target_mask
+        
+        # Rest of your code remains the same...
         source_tokens = x_res[source_mask].reshape(B, -1, C)
         target_tokens = x_res[target_mask].reshape(B, num_targets, C)
         source_keys = K_matrix[source_mask].reshape(B, -1, C)
         target_keys = K_matrix[target_mask].reshape(B, num_targets, C)
+        
         similarity = F.cosine_similarity(source_keys.unsqueeze(2), target_keys.unsqueeze(1), dim=-1)
-        match_indices = similarity.argmax(dim=2) # (B, num_sources)
+        match_indices = similarity.argmax(dim=2)
+        
         merged_tokens = target_tokens.clone()
         match_indices_expanded = match_indices.unsqueeze(-1).expand(-1, -1, C)
         merged_tokens.scatter_add_(1, match_indices_expanded, source_tokens)
+        
         counts = torch.ones_like(target_tokens[:, :, 0])
         counts.scatter_add_(1, match_indices, torch.ones_like(match_indices, dtype=torch.float))
         merged_main = merged_tokens / counts.unsqueeze(-1)
         merged = self.mlp1(merged_main)
-        # === Auxiliary Path ===
+        
+        # Auxiliary path handling...
         if self.training:
+            # Similar modifications for auxiliary path
             x_aux_norm = self.norm2(x_aux)
             q_aux, k_aux, v_aux = self.qkv_proj(x_aux_norm).chunk(3, dim=-1)
             attn_matrix = torch.bmm(q_aux, k_aux.transpose(1, 2)) / (self.dim ** 0.5)
-            attn_matrix = attn_matrix + saliency_scores.transpose(1, 2)
+            attn_matrix = attn_matrix + saliency_logits.unsqueeze(1)  # Use logits not tanh
             attn_weights = F.softmax(attn_matrix, dim=-1)
             attn_out_aux = torch.bmm(attn_weights, v_aux)
             x_aux = x_aux + attn_out_aux
@@ -94,6 +124,9 @@ class VideoTokenMergingTransformer(nn.Module):
         ])
         # self.pos_embedding = nn.Parameter(torch.randn(1, num_tokens, patch_dim))
         final_dim = dims[num_vtm_blocks]  # Final dimension after all VTM blocks
+        # self.prediction_head = nn.Sequential(
+        #     nn.Linear(final_dim, num_classes)
+        # )
         self.prediction_head1 = nn.Sequential(
             nn.Linear(final_dim, num_classes)
         )

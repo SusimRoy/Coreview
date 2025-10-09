@@ -38,7 +38,7 @@ class CustomDataset(Dataset):
         return len(self.videos)
 
     def __getitem__(self, idx):
-        video_features = np.load(f'{DATA_ROOT}/lvu/{self.videos[idx]}.npy')
+        video_features = np.load(f'{DATA_ROOT}/Breakfast2/{self.videos[idx]}.npy')
 
         if video_features.shape[0] < self.args.l_secs:
             step = video_features.shape[0] / float(self.args.l_secs)
