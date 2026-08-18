@@ -47,78 +47,6 @@ def parse_args():
     parser.add_argument('--save_dir', type=str, default='/data/susimmuk/VideoTokenMerging/LVU/OT', help='Directory to save results')
     return parser.parse_args()
 
-def save_training_curves(train_losses, val_losses, val_accuracies, save_dir, dataset_name='lvu'):
-    """
-    Save training loss and validation accuracy curves
-    """
-    save_dir = os.path.join(save_dir, 'training_plots')
-    os.makedirs(save_dir, exist_ok=True)
-    
-    epochs = range(1, len(train_losses) + 1)
-    
-    # Create subplots
-    fig, ((ax1, ax2)) = plt.subplots(1, 2, figsize=(15, 5))
-    fig.suptitle(f'Training Curves - {dataset_name.upper()}', fontsize=16, fontweight='bold')
-    
-    # Plot 1: Training and Validation Loss
-    ax1.plot(epochs, train_losses, 'b-o', label='Training Loss', linewidth=2, markersize=4)
-    ax1.plot(epochs, val_losses, 'r-s', label='Validation Loss', linewidth=2, markersize=4)
-    ax1.set_xlabel('Epoch')
-    ax1.set_ylabel('Loss')
-    ax1.set_title('Training & Validation Loss')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    ax1.set_xlim(1, len(epochs))
-    
-    # Plot 2: Validation Accuracy
-    ax2.plot(epochs, val_accuracies, 'g-^', label='Validation Accuracy', linewidth=2, markersize=4)
-    ax2.set_xlabel('Epoch')
-    ax2.set_ylabel('Accuracy (%)')
-    ax2.set_title('Validation Accuracy')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-    ax2.set_xlim(1, len(epochs))
-    
-    # Find best accuracy
-    best_epoch = np.argmax(val_accuracies) + 1
-    best_acc = max(val_accuracies)
-    ax2.axvline(x=best_epoch, color='red', linestyle='--', alpha=0.7)
-    ax2.annotate(f'Best: {best_acc:.2f}% (Epoch {best_epoch})', 
-                xy=(best_epoch, best_acc), xytext=(best_epoch+2, best_acc-5),
-                arrowprops=dict(arrowstyle='->', color='red', alpha=0.7),
-                fontsize=10, color='red')
-    
-    plt.tight_layout()
-    
-    # Save the combined plot
-    plot_path = os.path.join(save_dir, f'{dataset_name}_training_curves.png')
-    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-    plt.savefig(plot_path.replace('.png', '.pdf'), bbox_inches='tight')
-    plt.close()
-    
-    # Save metrics to text file
-    metrics_path = os.path.join(save_dir, f'{dataset_name}_training_metrics.txt')
-    with open(metrics_path, 'w') as f:
-        f.write(f"Training Metrics - {dataset_name.upper()}\n")
-        f.write("="*50 + "\n\n")
-        f.write(f"Total Epochs: {len(epochs)}\n")
-        f.write(f"Best Validation Accuracy: {best_acc:.4f}% (Epoch {best_epoch})\n")
-        f.write(f"Final Training Loss: {train_losses[-1]:.6f}\n")
-        f.write(f"Final Validation Loss: {val_losses[-1]:.6f}\n")
-        f.write(f"Final Validation Accuracy: {val_accuracies[-1]:.4f}%\n\n")
-        
-        f.write("Epoch-wise Details:\n")
-        f.write("-"*80 + "\n")
-        f.write("Epoch\tTrain_Loss\tVal_Loss\tVal_Acc\n")
-        f.write("-"*80 + "\n")
-        for i, epoch in enumerate(epochs):
-            f.write(f"{epoch}\t{train_losses[i]:.6f}\t{val_losses[i]:.6f}\t{val_accuracies[i]:.4f}\n")
-    
-    print(f"\n📊 Training curves saved to: {save_dir}")
-    print(f"   - Combined plot: {dataset_name}_training_curves.png")
-    print(f"   - Metrics file: {dataset_name}_training_metrics.txt")
-    print(f"   - Best validation accuracy: {best_acc:.2f}% at epoch {best_epoch}")
-
 def softmax(x):
     """Compute softmax values for each sets of scores in x."""
     e_x = np.exp(x - x.max())
@@ -148,39 +76,19 @@ def train(args, trainloader, model, optimizer, criterion):
     optimizer.zero_grad()
     for batch_idx, (video_name_batch, inputs, targets) in pbar:
         inputs, targets = inputs.to(args.device).float(), targets.to(args.device)
-
-        # import time
-        # start_time = time.time()
-        # optimizer.zero_grad()
         outputs, aux_outputs, ot_loss = model(inputs)
 
         if args.num_long_term_classes == -1:
             targets = targets.to(torch.float32)
             outputs = outputs[:, 0]
-            # aux_output = aux_output[:, 0]
 
         loss1 = criterion(outputs, targets)
         loss2 = criterion(aux_outputs, targets) 
-        # loss = 0.9*loss1 + 0.099 * loss2 
-        loss = 0.9*loss1 + 0.099 * loss2 + 5e-3*ot_loss.mean()
-        # loss = 0.4*loss1 + 0.1 * loss2 + 0.4*ot_loss.mean()
-        # loss = loss1
-        # loss.backward()
-        # optimizer.step()
-        # loss = loss / accum_steps
+        loss = 0.9*loss1 + 0.1 * loss2 + 0.5*ot_loss.mean()
         loss.backward()
-        # end_time = time.time()
-        # print(f"Time taken: {end_time - start_time:.2f} seconds")
-            # 🔄 update every 4 batches
         if (batch_idx + 1) % accum_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
-
-        # if batch_idx == 2:
-            # torch.cuda.synchronize()
-            # peak_mem = torch.cuda.max_memory_allocated() / 1024**3
-            # print(f"Peak GPU memory: {peak_mem:.2f} GB")
-            # exit()
         train_loss += loss.item()
         if args.num_long_term_classes > 0:
             _, predicted = outputs.max(1)
@@ -190,12 +98,8 @@ def train(args, trainloader, model, optimizer, criterion):
         if args.num_long_term_classes > 0:
             pbar.set_description(
                 '(%d/%d) | Loss: %.3f | Main: %.3f | Aux: %.3f | OT: %.3f | Acc: %.3f%%' %
-                (batch_idx, len(trainloader), train_loss / (batch_idx + 1), 0.9*loss1.item(), 0.099*loss2.item(), 1e-3*ot_loss.mean().item(), 100. * correct / total)
+                (batch_idx, len(trainloader), train_loss / (batch_idx + 1), 0.9*loss1.item(), 0.099*loss2.item(), 0.5*ot_loss.mean().item(), 100. * correct / total)
             )
-            # pbar.set_description(
-            #     '(%d/%d) | Loss: %.3f | Main: %.3f | Aux: %.3f | Acc: %.3f%%' %
-            #     (batch_idx, len(trainloader), train_loss / (batch_idx + 1), 0.9*loss1.item(), 0.099*loss2.item(), 100. * correct / total)
-            # )
         else:
             pbar.set_description(
                 '(%d/%d) | Loss: %.3f' %
@@ -358,13 +262,6 @@ def main():
     patch_dim = 1024
     # Model
     print('==> Building model..')
-    # model = HybridVideoTokenMergingTransformer(
-    #     num_classes=args.num_long_term_classes,
-    #     num_tokens=num_tokens,
-    #     patch_dim=patch_dim,
-    #     num_vtm_blocks=3,
-    #     num_heads=8
-    # )
     model = VideoTokenMergingTransformer(
         num_classes=args.num_long_term_classes,
         num_tokens=num_tokens,
@@ -414,11 +311,7 @@ def main():
         test_acc = eval(args=args, dataloader=testloader, model=model,
                    epoch=0, criterion=criterion, split='test')
         return
-    
-    # Lists to store metrics for plotting
-    train_losses = []
-    val_losses = []
-    val_accuracies = []
+
 
     pbar = tqdm(range(start_epoch, start_epoch + args.epochs))
     for epoch in pbar:
@@ -442,9 +335,7 @@ def main():
             test_acc = eval(args=args, dataloader=testloader, model=model,
                        epoch=epoch + 1, criterion=criterion, split='test')
             
-            # Store metrics for plotting
-            val_accuracies.append(val_acc if args.num_long_term_classes > 0 else -val_acc)  # For MSE, we want lower values
-            
+            # Store metrics for plotting            
             with open(args.output_eval_file, "a") as writer:
                 for i, param_group in enumerate(optimizer.param_groups):
                     lr = param_group['lr']
@@ -469,20 +360,6 @@ def main():
 
     print(f"\n✅ Training complete. Best validation result: {best_val_acc:.4f}")
     print(f"✅ Best test result: {best_test_acc:.4f}")
-
-    # Save training curves if we have enough data
-    # if len(val_accuracies) > 0:
-    #     # Create dummy train/val losses for plotting (since we don't track them every epoch)
-    #     train_losses = [0.5 - 0.01*i for i in range(len(val_accuracies))]  # Dummy decreasing loss
-    #     val_losses = [0.4 - 0.008*i for i in range(len(val_accuracies))]   # Dummy decreasing loss
-        
-    #     save_training_curves(
-    #         train_losses=train_losses,
-    #         val_losses=val_losses, 
-    #         val_accuracies=val_accuracies,
-    #         save_dir='./training_plots',
-    #         dataset_name=f'{args.dataset}_{args.long_term_task}'
-    #     )
 
 if __name__ == "__main__":
     main()
