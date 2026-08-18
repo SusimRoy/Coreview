@@ -1,0 +1,133 @@
+VARIANCE SHIFT ANALYSIS REPORT
+==================================================
+
+Model: /home/csgrad/susimmuk/long-video/best_model_breakfast_k600_22k.pth
+Model Type: breakfast
+Device: cuda
+
+LAYER-WISE SHIFT SUMMARY
+------------------------------
+
+input → vtm_block_0:
+  Variance Shift:
+    Mean: 14951.436211
+    Std:  6413.845528
+    Max:  30396.492508
+    Min:  5342.007950
+  Covariance Shift:
+    Mean: 80561.308771
+    Std:  43660.505052
+    Max:  161935.564743
+    Min:  23136.619247
+  Mean Shift:
+    Mean: 923.886915
+    Std:  346.527937
+    Max:  1523.662142
+    Min:  519.988966
+  Relative Variance Change:
+    Mean: 405.153803
+    Std:  175.881541
+    Max:  842.662971
+    Min:  152.223777
+  Spectral Shift:
+    Mean: 73463.188947
+    Std:  44550.153708
+    Max:  156650.760437
+    Min:  17964.692505
+
+vtm_block_0 → vtm_block_1:
+  Variance Shift:
+    Mean: 5411.952441
+    Std:  7802.418147
+    Max:  33708.941406
+    Min:  521.258789
+  Covariance Shift:
+    Mean: 42229.327311
+    Std:  23738.695766
+    Max:  89740.351562
+    Min:  16620.344727
+  Mean Shift:
+    Mean: 458.808816
+    Std:  142.265348
+    Max:  692.152405
+    Min:  222.375488
+  Relative Variance Change:
+    Mean: 0.369679
+    Std:  0.360193
+    Max:  1.553456
+    Min:  0.031191
+  Spectral Shift:
+    Mean: 35822.948763
+    Std:  24412.465023
+    Max:  85692.273438
+    Min:  11668.051758
+
+vtm_block_1 → vtm_block_2:
+  Variance Shift:
+    Mean: 13356.846750
+    Std:  12438.998579
+    Max:  51801.977051
+    Min:  2413.433655
+  Covariance Shift:
+    Mean: 35567.106303
+    Std:  32324.225873
+    Max:  131237.453125
+    Min:  6337.802338
+  Mean Shift:
+    Mean: 352.721393
+    Std:  161.142749
+    Max:  618.763077
+    Min:  145.895973
+  Relative Variance Change:
+    Mean: 0.905084
+    Std:  0.042203
+    Max:  0.957757
+    Min:  0.803068
+  Spectral Shift:
+    Mean: 34810.617952
+    Std:  32439.883810
+    Max:  131050.510742
+    Min:  6055.371887
+
+
+PROBLEMATIC TOKENS
+--------------------
+
+input → vtm_block_0:
+  Most frequently problematic tokens (token_idx: frequency):
+    Token 2192: appears in 2 samples
+    Token 1656: appears in 2 samples
+    Token 3113: appears in 2 samples
+    Token 974: appears in 2 samples
+    Token 1069: appears in 2 samples
+
+vtm_block_0 → vtm_block_1:
+  Most frequently problematic tokens (token_idx: frequency):
+    Token 355: appears in 3 samples
+    Token 453: appears in 3 samples
+    Token 506: appears in 3 samples
+    Token 497: appears in 2 samples
+    Token 322: appears in 2 samples
+
+vtm_block_1 → vtm_block_2:
+  Most frequently problematic tokens (token_idx: frequency):
+    Token 31: appears in 5 samples
+    Token 45: appears in 5 samples
+    Token 72: appears in 4 samples
+    Token 40: appears in 4 samples
+    Token 42: appears in 4 samples
+
+
+RECOMMENDATIONS
+---------------
+1. Layer transition 'input_to_vtm_block_0' shows highest variance shift (14951.436211)
+   Consider adding regularization or adjusting learning rates for this layer.
+
+2. High covariance shifts detected in:
+   - input_to_vtm_block_0
+   - vtm_block_0_to_vtm_block_1
+   - vtm_block_1_to_vtm_block_2
+   This may indicate overfitting. Consider dropout or weight decay.
+
+3. Monitor tokens that frequently appear as problematic across samples.
+   These may benefit from attention masking or token-specific regularization.

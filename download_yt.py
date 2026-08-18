@@ -3,6 +3,7 @@ import os
 import random
 from csv import reader
 import glob
+from tqdm import tqdm
 
 files = glob.glob('data/lvu_1.0/*/*.csv')
 print('Total files : ', len(files))
@@ -19,15 +20,14 @@ for file in files:
                 else:
                     youtube_id = row[0].split(' ')[2]
                 dest = f'/data_local3/susimmuk/youtube-dl/{youtube_id}.mp4'
-                #if not os.path.exists(dest):
                 all_ids.add(youtube_id)
 
 print('Total videos : ',len(all_ids))
 
-for youtube_id in all_ids:
+for youtube_id in tqdm(all_ids):
     dest = f'/data_local3/susimmuk/youtube-dl/{youtube_id}.mp4'
     if not os.path.exists(dest):
-        cmd = f'yt-dlp -f 18 --cookies youtube.com_cookies.txt -o {dest} https://www.youtube.com/watch?v={youtube_id}'
+        cmd = f'yt-dlp -f 18 --cookies youtube.com_cookies.txt --sleep-interval 5 --quiet --no-warnings -o {dest} https://www.youtube.com/watch?v={youtube_id}'
         os.system(cmd)
 
 
