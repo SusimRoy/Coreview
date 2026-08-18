@@ -9,7 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse
 import numpy as np
 from tqdm.auto import tqdm
-from models.model_select_merge import HybridVideoTokenMergingTransformer
+from models.model_lvu import VideoTokenMergingTransformer
 from datasets.coin_dataset import CustomDataset
 import math
 import ot
