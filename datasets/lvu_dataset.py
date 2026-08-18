@@ -13,8 +13,8 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 set_seed(1112)
 
-DATA_ROOT = '/playpen-storage/mmiemon/lvu/data'
-duration_data = pd.read_csv('/playpen-storage/mmiemon/lvu/data/CMD/metadata/durations.csv').set_index('videoid')
+DATA_ROOT = '/data_local3/susimmuk'
+duration_data = pd.read_csv('/home/csgrad/susimmuk/long-video/data/lvu_1.0/lvu_durations.csv').set_index('videoid')
 
 class CustomDataset(Dataset):
     def __init__(self, args, split):
@@ -25,13 +25,13 @@ class CustomDataset(Dataset):
         self.labels = []
         self.starts = []
 
-        csv_file = f'{DATA_ROOT}/lvu_1.0/{args.long_term_task}/{split}.csv'
+        csv_file = f'/home/csgrad/susimmuk/long-video/data/lvu_1.0/{args.long_term_task}/{split}.csv'
         with open(csv_file, 'r') as f:
             f.readline()
             for line in f:
                 video_id = line.split()[-2].strip()
-                if not os.path.exists(f'{DATA_ROOT}/vit_features_spatial/{video_id}.npy'):
-                    print("Features not found for video : ", video_id)
+                if not os.path.exists(f'{DATA_ROOT}/lvu/features/{video_id}.npy'):
+                    # print("Features not found for video : ", video_id)
                     continue
 
                 if args.long_term_task == 'view_count':
@@ -74,8 +74,9 @@ class CustomDataset(Dataset):
             idx = random.randint(0, len(self.videos)-1)
 
         if self.args.feature_type == 'vit_spatial':
-            video_features = np.load(f'{DATA_ROOT}/vit_features_spatial/{self.videos[idx]}.npy')
-            x = np.zeros((self.args.l_secs, 197, 1024))
+            video_features = np.load(f'{DATA_ROOT}/lvu/features/{self.videos[idx]}.npy')
+            video_features = video_features[:, 1:]
+            x = np.zeros((self.args.l_secs, 196, 1024))
             for i in range(self.starts[idx], min(self.starts[idx] + self.args.l_secs, video_features.shape[0])):
                 x[i - self.starts[idx]] = video_features[i]
             x = np.reshape(x,(x.shape[0]* x.shape[1], 1024))

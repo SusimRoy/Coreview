@@ -36,6 +36,34 @@ class CustomDataset(Dataset):
 
     def __len__(self):
         return len(self.videos)
+    
+    def get_segment_frame_mapping(self, video_id):
+        """
+        Calculate which frames in the original video each segment corresponds to.
+        This replicates the logic from feature extraction.
+        """
+        from moviepy.editor import VideoFileClip
+        
+        file = video_id.split('.')[0].replace('-', '/')
+        video_path = f'{DATA_ROOT}/BreakfastII_15fps_qvga_sync/{file}.avi'
+        
+        clip = VideoFileClip(video_path)
+        n_frames = int(clip.duration * clip.fps)
+        clip.close()
+        
+        n_segments = 512
+        segment_length = 32
+        
+        if n_frames < (n_segments + segment_length):
+            starts = np.array([i for i in range(n_frames - segment_length)])
+        else:
+            step = (n_frames - segment_length) / float(n_segments)
+            starts = np.arange(0, n_frames - segment_length, step=step)
+        
+        starts = starts.astype(np.int32)
+        # Returns array where starts[i] is the first frame of segment i
+        # Segment i includes frames [starts[i], starts[i] + 32)
+        return starts, segment_length
 
     def __getitem__(self, idx):
         video_features = np.load(f'{DATA_ROOT}/Breakfast2/{self.videos[idx]}.npy')
@@ -54,10 +82,20 @@ class CustomDataset(Dataset):
                 step = video_features.shape[0] / float(self.args.l_secs)
                 indices = np.arange(0, video_features.shape[0], step, dtype=np.float32).astype(np.int32)
                 video_features = video_features[indices]
+        else:
+            indices = np.arange(video_features.shape[0])
 
+        # Get frame ranges for selected segments
+        starts, segment_length = self.get_segment_frame_mapping(self.videos[idx])
+        frame_ranges = np.array([[starts[i], starts[i] + segment_length] for i in indices])
+        
+        # Expand frame_ranges to match each token (each segment has 7*7 = 49 tokens)
+        # So we repeat each frame range 49 times
+        frame_ranges_per_token = np.repeat(frame_ranges, 49, axis=0)  # Shape: (64*49, 2)
+        
         video_features = np.reshape(video_features,(video_features.shape[0]* video_features.shape[1], 1024))
 
-        return self.videos[idx], video_features, self.labels[idx]
+        return self.videos[idx], video_features, self.labels[idx], frame_ranges_per_token
     
     # def __getitem__(self, idx):
     #     # Construct the video file path

@@ -9,17 +9,26 @@ import glob
 import torch.nn as nn
 import random
 import pickle
+from tqdm import tqdm 
 
 DATA_ROOT = '/data_local3/susimmuk/'
 
 duration_data = pd.read_csv('/home/csgrad/susimmuk/long-video/data/lvu_1.0/lvu_durations.csv').set_index('videoid')
 
 def get_video(video_path):
-    video = skvideo.io.vread(video_path)
+    cap = cv2.VideoCapture(video_path)
     frames = []
-    for i in range(video.shape[0]):
-        image = cv2.resize(video[i], (224, 224), interpolation=cv2.INTER_AREA)
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        # Convert BGR to RGB (OpenCV uses BGR by default)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        image = cv2.resize(frame, (224, 224), interpolation=cv2.INTER_AREA)
         frames.append(image)
+    
+    cap.release()
     frames = np.asarray(frames) / 255.0
     return frames
 
@@ -48,17 +57,18 @@ print('Total unique videos: ', len(set(all_ids)))
 random.shuffle(all_ids) #helps if you want to run multiple instances parallelly
 
 cnt = 0
-for video_id in all_ids:
-    dest = f'{DATA_ROOT}data/covnext_feature/{video_id}.npy' #destination to save features
-    if os.path.exists(dest):
-        video_fp = f'{DATA_ROOT}data/mc_videos/{video_id}.mp4' #destination of source video
+ctr = 0
+for video_id in tqdm(all_ids):
+    dest = f'{DATA_ROOT}lvu/features/{video_id}.npy' #destination to save features
+    if not os.path.exists(dest):
+        video_fp = f'{DATA_ROOT}lvu/videos/{video_id}.mp4' #destination of source video
         if not os.path.exists(video_fp):
-            print('Video not found :', video_id)
+            ctr+=1
         if os.path.exists(video_fp):
             video = get_video(video_fp)
             video = torch.from_numpy(video.transpose([0, 3, 1, 2])).float()
             duration = duration_data.loc[video_id]['duration']
-            print(cnt, video_id, video.shape, duration)
+            # print(cnt, video_id, video.shape, duration)
 
             features = np.zeros((duration+1, 197, 1024))
 
@@ -73,3 +83,5 @@ for video_id in all_ids:
 
             np.save(dest, features)
             cnt += 1
+print(f"Total videos processed: {cnt}")
+print(f"Total videos not found: {ctr}")
